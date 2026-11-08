@@ -1,6 +1,6 @@
 {
   "name": "dsh-handover",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "跨会话交接：把旧会话压成交接包（进度/动过的文件/待办），让新会话接着干活；旧会话全程只读。",
   "type": "module",
   "main": "lib/index.js",

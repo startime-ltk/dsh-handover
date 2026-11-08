@@ -113,5 +113,20 @@ console.log('不给 sessions :', String(await tool.execute({ action: 'pack' }, e
 console.log('不存在的 id   :', String(await tool.execute({ action: 'pack', sessions: ['session-nope'] }, exec)).split('\n')[0]);
 const selfText = String(await tool.execute({ action: 'pack', sessions: [CALLER.id] }, exec));
 console.log('指向当前会话   :', selfText.split('\n').slice(0, 2).join(' | '));
+
+// budget 是所有会话合计的上限：多会话 + 小预算，总长必须压住
+const twoIds = loaded.slice(0, 2).map((s) => s.id);
+const multi = String(await tool.execute({ action: 'pack', sessions: twoIds, budget: 1200 }, exec));
+console.log(`多会话 budget=1200 → 实际 ${multi.length} 字，${multi.length <= 1200 ? 'OK' : '超了！'}`);
+const opens = (multi.match(/<handover /g) ?? []).length;
+const closes = (multi.match(/<\/handover>/g) ?? []).length;
+console.log(`  XML 配对: 开 ${opens} / 闭 ${closes} → ${opens === closes ? '平衡' : '不平衡！'}`);
+console.log(`  是否给出省略提示: ${multi.includes('省略') ? '是' : '否'}`);
+
+// 单会话：段 1 只应有一条进度
+const one = String(await tool.execute({ action: 'pack', sessions: [loaded[0].id], budget: 3000 }, exec));
+const progressLines = one.split('### 1. 上次干到哪了')[1]?.split('###')[0]?.split('\n').filter((l) => l.startsWith('- ')) ?? [];
+console.log(`段 1 进度条数: ${progressLines.length}（期望 1）`);
+
 console.log('');
 console.log('冒烟通过。');

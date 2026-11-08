@@ -4,11 +4,14 @@ import {
   DEFAULT_BUDGET_CHARS,
   classifyTool,
   clip,
+  clipSentence,
   extractDigest,
   pathsFromArguments,
+  pickProgressTexts,
   rankCandidates,
   renderCandidateList,
   renderPack,
+  similarity,
 } from '../lib/core.js';
 
 const REASONING_TEXT = '这是在思考，不该出现在交接包里';
@@ -179,4 +182,82 @@ test('renderCandidateList 空列表给人话，非空带 id', () => {
   );
   assert.ok(text.includes('session-abc'));
   assert.ok(text.includes('●'));
+});
+
+// —— 0.1.1 修的 bug 的回归测试 ——
+
+test('classifyTool 不再把 create_goal / create_worktree 当成写文件', () => {
+  assert.equal(classifyTool('create_goal'), undefined);
+  assert.equal(classifyTool('create_worktree'), undefined);
+  assert.equal(classifyTool('todo_write'), undefined);
+  assert.equal(classifyTool('mcp__fs__write'), 'write');
+  assert.equal(classifyTool('str_replace_editor'), 'write');
+});
+
+test('pathsFromArguments 不做全文泛扫，目标描述里的路径不算改动', () => {
+  // create_goal 的参数是一大段自然语言，里面有路径也不该被记成"动过的文件"
+  const args = JSON.stringify({ objective: '把 C:\\demo\\ws\\a.js 和 D:\\x\\b.md 合并' });
+  assert.deepEqual(pathsFromArguments(args), []);
+});
+
+test('clipSentence 在句末标点收尾，不切半句', () => {
+  const text = '第一句结论。第二句补充说明。第三句很长的内容'.repeat(3);
+  const out = clipSentence(text, 40);
+  assert.ok(out.length <= 40, `长度 ${out.length} 超了`);
+  assert.ok(/[。！？；]$/.test(out), `没有停在句末标点：${JSON.stringify(out)}`);
+});
+
+test('similarity 能识别同一结论的两次表述', () => {
+  const a = '没有可装的东西：registry 上只有 331 字节的占位包，没有 1.1.71。';
+  const b = '结论不变：registry 上只有 331 字节的占位包，没有 1.1.71 版本。';
+  assert.ok(similarity(a, b) > 0.6, `相似度只有 ${similarity(a, b).toFixed(2)}`);
+});
+
+test('pickProgressTexts 默认只取 1 条实质正文', () => {
+  const long = '这是一段足够长的结论正文。'.repeat(8);
+  const another = '另一段也很长的内容，讲的是不同的事情。'.repeat(8);
+
+  // 默认 maxCount=1：长会话里两条必然语义重复，只留最后一条
+  assert.equal(pickProgressTexts([long, another]).length, 1);
+  assert.deepEqual(pickProgressTexts([long, another]), [another]);
+
+  // 末尾的极短回复（"好的。"）要被跳过，取前面有实质内容的
+  assert.deepEqual(pickProgressTexts([long, '好的。']), [long]);
+
+  // 显式要 2 条时才回 2 条（且近似重复会被兜掉）
+  assert.equal(pickProgressTexts([long, another], { maxCount: 2 }).length, 2);
+});
+
+test('交接包头部与正文之间有空行，不糊在一起', () => {
+  const pack = renderPack({ digest: extractDigest(EVENTS), sessionId: 's' });
+  assert.match(pack, /工作目录：[^\n]*\n\n### 1\./, '工作目录后面应有一个空行');
+});
+
+test('renderPack 极小预算也保留闭合标签，不产出畸形 XML', () => {
+  const digest = extractDigest(EVENTS);
+  for (const budget of [400, 420, 460]) {
+    const pack = renderPack({ digest, sessionId: 's', budgetChars: budget });
+    assert.ok(pack.length <= budget, `budget=${budget} 长度 ${pack.length}`);
+    assert.ok(pack.trimEnd().endsWith('</handover>'), `budget=${budget} 闭合标签被截掉了`);
+    assert.ok(pack.startsWith('<handover'), '开标签丢了');
+  }
+});
+
+test('renderPack 正文超预算时丢整段而不是切断段落', () => {
+  const crowded = [];
+  for (let i = 0; i < 40; i++) {
+    crowded.push({
+      type: 'tool/call',
+      data: { name: 'edit', arguments: JSON.stringify({ file_path: `C:\\p\\f${i}.js` }) },
+    });
+    crowded.push({
+      type: 'user/message',
+      data: { source: { kind: 'user' }, content: [{ type: 'text', text: `第 ${i} 条要求，请处理一下。` }] },
+    });
+  }
+  const pack = renderPack({ digest: extractDigest(crowded), sessionId: 's', budgetChars: 1200 });
+  assert.ok(pack.length <= 1200);
+  assert.ok(pack.trimEnd().endsWith('</handover>'));
+  // 丢段时会给提示，不会静默少内容
+  if (pack.includes('省略')) assert.match(pack, /省略 \d+ 个小段/);
 });
