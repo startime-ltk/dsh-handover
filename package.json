@@ -1,0 +1,38 @@
+{
+  "name": "dsh-handover",
+  "version": "0.1.0",
+  "description": "跨会话交接：把旧会话压成交接包（进度/动过的文件/待办），让新会话接着干活；旧会话全程只读。",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT",
+  "private": true,
+  "dependencies": {},
+  "peerDependencies": {
+    "@deepseek-ai/dsh-tools": ">=0.1.7-rc.1 <0.3.0-0"
+  },
+  "devDependencies": {
+    "@deepseek-ai/dsh-tools": "0.2.2-rc.1"
+  },
+  "scripts": {
+    "test": "node --test test/core.test.mjs",
+    "try-real": "node scripts/try-real.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "package.json"
+  ]
+}

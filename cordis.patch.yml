@@ -1,0 +1,10 @@
+# dsh-handover bundle patch
+#
+# 把插件挂进宿主。插件本身只注册一个 handover 工具，
+# 依赖宿主已有的 tools 与 sessionQuery 两个服务。
+- insert:
+    - id: dsh-handover
+      name: dsh-handover
+      config:
+        maxCandidates: 20
+        budgetChars: 3000
