@@ -1,0 +1,30 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Install peer dependency
+        run: npm install --no-audit --no-fund
+      - name: Unit tests
+        run: node --test test/core.test.mjs
+      - name: Syntax check
+        run: |
+          node --check lib/core.js
+          node --check lib/index.js
+          node --check scripts/try-real.mjs
+          node --check scripts/smoke.mjs

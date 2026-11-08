@@ -11,7 +11,7 @@ import zlib from 'node:zlib';
 import * as plugin from '../lib/index.js';
 
 const ROOT = path.join(os.homedir(), '.dsh', 'sessions');
-const CALLER = { id: 'session-caller-current', cwd: path.join(os.homedir(), 'demo-workspace') };
+const CALLER = { id: 'session-caller-current', cwd: null };
 
 function findSessions(dir, out = []) {
   if (!fs.existsSync(dir)) return out;
@@ -55,6 +55,9 @@ if (loaded.length === 0) {
 }
 console.log(`载入真实会话 ${loaded.length} 个：`);
 for (const s of loaded) console.log(`  - ${s.id}  cwd=${s.session.cwd}  ${s.events.length} 条事件`);
+// 冒烟里把"当前会话"放在与真实会话相同的工作目录，才符合实际使用场景
+CALLER.cwd = loaded[0].session.cwd ?? null;
+console.log(`（把当前会话的工作目录设成 ${CALLER.cwd}）`);
 console.log('');
 
 const registered = [];
@@ -127,6 +130,25 @@ console.log(`  是否给出省略提示: ${multi.includes('省略') ? '是' : '�
 const one = String(await tool.execute({ action: 'pack', sessions: [loaded[0].id], budget: 3000 }, exec));
 const progressLines = one.split('### 1. 上次干到哪了')[1]?.split('###')[0]?.split('\n').filter((l) => l.startsWith('- ')) ?? [];
 console.log(`段 1 进度条数: ${progressLines.length}（期望 1）`);
+
+// —— 中途回查细节：search → read ——
+console.log('');
+console.log('=== 中途回查（search 不带 sessions，全同目录扫）===');
+const searchOut = String(await tool.execute({ action: 'search', query: 'registry', limit: 3 }, exec));
+console.log(searchOut.split('\n').slice(0, 9).join('\n'));
+
+const seqMatch = searchOut.match(/\[seq (\d+)\]/);
+if (seqMatch) {
+  const hitSession = searchOut.match(/在 (session-[0-9a-f-]+) 里找到/) ?? [];
+  const sid = hitSession[1] ?? loaded[0].id;
+  console.log('');
+  console.log(`=== 按 seq 取原文 (${sid} / seq ${seqMatch[1]}) ===`);
+  const readOut = String(await tool.execute({ action: 'read', session: sid, seq: Number(seqMatch[1]) }, exec));
+  console.log(readOut.split('\n').slice(0, 6).join('\n'));
+  console.log(`（read 输出 ${readOut.length} 字）`);
+} else {
+  console.log('没搜到 "registry"，换关键词再试也行（不算失败）');
+}
 
 console.log('');
 console.log('冒烟通过。');

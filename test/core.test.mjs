@@ -6,11 +6,17 @@ import {
   clip,
   clipSentence,
   extractDigest,
+  extractShellCommand,
+  isStateChangingCommand,
   pathsFromArguments,
   pickProgressTexts,
   rankCandidates,
   renderCandidateList,
+  renderEventWindow,
   renderPack,
+  renderSearchResults,
+  scanEvents,
+  selectUserLines,
   similarity,
 } from '../lib/core.js';
 
@@ -231,6 +237,111 @@ test('pickProgressTexts 默认只取 1 条实质正文', () => {
 test('交接包头部与正文之间有空行，不糊在一起', () => {
   const pack = renderPack({ digest: extractDigest(EVENTS), sessionId: 's' });
   assert.match(pack, /工作目录：[^\n]*\n\n### 1\./, '工作目录后面应有一个空行');
+});
+
+// —— 0.2.0 新能力 ——
+
+test('extractShellCommand 从 shell 工具参数里取命令行', () => {
+  assert.equal(extractShellCommand(JSON.stringify({ command: 'git   status' })), 'git status');
+  assert.equal(extractShellCommand(JSON.stringify({ script: 'npm install' })), 'npm install');
+  assert.equal(extractShellCommand(JSON.stringify({ other: 1 })), null);
+  assert.equal(extractShellCommand('不是 JSON'), null);
+});
+
+test('isStateChangingCommand 只认会改变状态的命令', () => {
+  assert.equal(isStateChangingCommand('git commit -m "x"'), true);
+  assert.equal(isStateChangingCommand('npm install'), true);
+  assert.equal(isStateChangingCommand('Remove-Item -Recurse .tmp'), true);
+  assert.equal(isStateChangingCommand('Get-ChildItem -Force'), false);
+  assert.equal(isStateChangingCommand('grep -r foo .'), false);
+});
+
+test('extractDigest 记录跑过的关键命令，忽略只读命令', () => {
+  const events = [
+    { type: 'tool/call', data: { name: 'pwsh', arguments: JSON.stringify({ command: 'Get-ChildItem' }) } },
+    { type: 'tool/call', data: { name: 'pwsh', arguments: JSON.stringify({ command: 'git commit -m "feat"' }) } },
+    { type: 'tool/call', data: { name: 'pwsh', arguments: JSON.stringify({ command: 'npm install' }) } },
+  ];
+  const digest = extractDigest(events);
+  assert.deepEqual(digest.commands, ['git commit -m "feat"', 'npm install']);
+});
+
+test('extractDigest 判断上次是否正常结束', () => {
+  const interrupted = extractDigest([{ type: 'turn/start', data: { turn: 1 } }]);
+  assert.equal(interrupted.completed, false, '有 turn/start 没有 turn/end = 被打断');
+
+  const finished = extractDigest([
+    { type: 'turn/start', data: { turn: 1 } },
+    { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
+  ]);
+  assert.equal(finished.completed, true);
+
+  assert.equal(extractDigest([]).completed, null, '没有轮次信息时不做判断');
+});
+
+test('交接包会提示"上次没正常结束"', () => {
+  const events = [...EVENTS, { type: 'turn/start', data: { turn: 99 } }];
+  const pack = renderPack({ digest: extractDigest(events), sessionId: 's' });
+  assert.match(pack, /没有正常结束/);
+});
+
+test('selectUserLines 保住最早的硬约束', () => {
+  const texts = [
+    '安装到 D 盘，插件单独一个文件夹，先不要做，先告诉我有什么问题',
+    '好',
+    ...Array.from({ length: 20 }, (_, i) => `第 ${i + 3} 条普通要求`),
+  ];
+  const lines = selectUserLines(texts, { early: 3, late: 9 });
+  assert.ok(
+    lines.some((l) => l.includes('先不要做')),
+    '最早的约束必须还在',
+  );
+  assert.ok(lines.some((l) => /省略 \d+ 条用户消息/.test(l)), '中间要有省略标注');
+  assert.ok(lines.length <= 3 + 9 + 1);
+});
+
+test('scanEvents 能按关键词找到带 seq 的片段', () => {
+  const events = [
+    { type: 'user/message', seq: 10, time: 1000, data: { source: { kind: 'user' }, content: [{ type: 'text', text: '安装 purge 1.1.71' }] } },
+    { type: 'assistant/message', seq: 18, time: 2000, data: { message: { content: [{ type: 'text', text: 'registry 上只有占位包，没有 1.1.71' }] } } },
+    { type: 'tool/result', seq: 22, time: 3000, data: { message: { content: [{ type: 'text', text: 'npm error 404 purgg' }] } } },
+    { type: 'user/message', seq: 30, time: 4000, data: { source: { kind: 'runtime-context' }, content: [{ type: 'text', text: '注入的上下文里也提到 1.1.71' }] } },
+  ];
+  const hits = scanEvents(events, '1.1.71');
+  assert.equal(hits.length, 2, '宿主注入的上下文不参与检索');
+  assert.deepEqual(
+    hits.map((h) => h.seq),
+    [10, 18],
+  );
+  assert.equal(hits[0].role, 'user');
+  assert.ok(hits[1].snippet.includes('占位包'));
+
+  assert.equal(scanEvents(events, '1.1.71 占位包').length, 1, '多个词要求全部命中');
+  assert.equal(scanEvents(events, '').length, 0);
+});
+
+test('renderSearchResults 给出可用的 seq 和下一步提示', () => {
+  const text = renderSearchResults(
+    [{ seq: 18, time: 2000, type: 'assistant/message', role: 'assistant', snippet: '…占位包…', chars: 30 }],
+    { query: '占位包', sessionId: 'session-abc' },
+  );
+  assert.ok(text.includes('seq 18'));
+  assert.ok(text.includes('action: "read"'));
+  assert.match(renderSearchResults([], { query: 'x', sessionId: 'session-abc' }), /没有找到/);
+});
+
+test('renderEventWindow 按 seq 取原文并标出目标', () => {
+  const events = [
+    { type: 'user/message', seq: 10, time: 1000, data: { source: { kind: 'user' }, content: [{ type: 'text', text: '第一条' }] } },
+    { type: 'assistant/message', seq: 18, time: 2000, data: { message: { content: [{ type: 'text', text: '目标这条的原文' }] } } },
+    { type: 'user/message', seq: 30, time: 3000, data: { source: { kind: 'user' }, content: [{ type: 'text', text: '第三条' }] } },
+  ];
+  const text = renderEventWindow(events, { seq: 18, before: 1, after: 1 });
+  assert.ok(text.includes('目标这条的原文'));
+  assert.ok(text.includes('← 你要的'));
+  assert.ok(text.includes('第一条'), 'before=1 应带上前一条');
+  assert.ok(text.includes('第三条'), 'after=1 应带上后一条');
+  assert.match(renderEventWindow(events, { seq: 999 }), /没有 seq=999/);
 });
 
 test('renderPack 极小预算也保留闭合标签，不产出畸形 XML', () => {

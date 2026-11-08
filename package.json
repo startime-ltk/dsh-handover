@@ -1,6 +1,6 @@
 {
   "name": "dsh-handover",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "跨会话交接：把旧会话压成交接包（进度/动过的文件/待办），让新会话接着干活；旧会话全程只读。",
   "type": "module",
   "main": "lib/index.js",
@@ -13,6 +13,14 @@
   },
   "license": "MIT",
   "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/startime-ltk/dsh-handover.git"
+  },
+  "homepage": "https://github.com/startime-ltk/dsh-handover#readme",
+  "bugs": {
+    "url": "https://github.com/startime-ltk/dsh-handover/issues"
+  },
   "dependencies": {},
   "peerDependencies": {
     "@deepseek-ai/dsh-tools": ">=0.1.7-rc.1 <0.3.0-0"
